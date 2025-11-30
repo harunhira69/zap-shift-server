@@ -1,6 +1,6 @@
 const express = require('express')
 const cors = require('cors')
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 const app = express()
 require('dotenv').config();
@@ -36,15 +36,37 @@ async function run() {
 
     // parcel api
     app.get('/parcel',async(req,res)=>{
-      
+      const query ={};
+      const {email} = req.query
+
+        if(email){
+        query.senderEmail = email;
+        
+      }
+      const option = {sort:{createdAt:-1}}
+      const cursor = percelCollection.find(query,option);
+      const result = await cursor.toArray();
+      res.send(result)
+    
 
     })
 
     app.post('/parcel',async(req,res)=>{
       const parcel = req.body;
+      parcel.createdAt = new Date();
       const result = await percelCollection.insertOne(parcel);
       res.send(result)
-    })
+    });
+
+  app.delete('/parcel/:id', async (req, res) => {
+  const id = req.params.id;
+  console.log("Deleting parcel:", id);
+
+  const query = { _id: new ObjectId(id) };
+  const result = await percelCollection.deleteOne(query);
+  res.send(result);
+});
+
 
   
 
