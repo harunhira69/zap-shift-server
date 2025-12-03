@@ -78,6 +78,38 @@ async function run() {
 
 
     })
+    app.post('/checkout-session', async(req,res)=>{
+      const paymentInfo = req.body;
+      const amount = parseInt(paymentInfo.cost)*100;
+      const session = await stripe.checkout.sessions.create({
+       line_items: [
+      {
+   
+        price_data:{
+          currency:'USD',
+          product_data:{
+                name: `Please pay for parcel ${paymentInfo.parcelName}`,
+          },
+     
+          unit_amount:amount,
+
+        }
+,
+        quantity: 1,
+      },
+    ],
+    mode: 'payment',
+    metadata: {
+        parcelId: paymentInfo.parcelId,
+      },
+    customer_email:paymentInfo.senderEmail,
+ success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+
+      });
+      res.send({url:session.url})
+    })
+    // old
  app.post('/create-checkout-session', async (req, res) => {
   try {
     const paymentInfo = req.body;
@@ -112,6 +144,42 @@ async function run() {
     res.status(400).send({ error: error.message });
   }
 });
+
+app.patch('/verify-success-payment', async (req, res) => {
+  try {
+    const sessionId = req.query.session_id;
+
+    if (!sessionId) {
+      return res.status(400).send({ error: "session_id missing" });
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+    console.log("Session retrieved:", session);
+
+    if (session.payment_status === "paid") {
+      const id = session.metadata.parcelId;
+
+      const query = { _id: new ObjectId(id) };
+      const update = {
+        $set: {
+          status: "paid"
+        }
+      };
+
+      const result = await percelCollection.updateOne(query, update);
+
+      return res.send({ success: true, updated: result });
+    }
+
+    return res.send({ success: false });
+
+  } catch (error) {
+    console.error("Verify Error:", error);
+    return res.status(500).send({ error: error.message });
+  }
+});
+
 
 
 
