@@ -189,21 +189,16 @@ app.patch('/verify-success-payment', async (req, res) => {
         transaction:session.payment_intent,
         paymentStatus: session.payment_status,
         createdAt:new Date(),
-
-
-
+        trackingId:trackingId
       }
       if(payment.paymentStatus==='paid'){
   const resultPayment = await paymentCollection.insertOne(payment);
-  res.send({success:true,
+  return res.send({success:true,
     modifyParcel:result,
     transactionId:session.payment_intent,
     paymentInfo:resultPayment,
     trackingId:trackingId})
-
       }
-
-      return res.send({ success: true, updated: result });
     }
 
     return res.send({ success: false });
@@ -213,6 +208,17 @@ app.patch('/verify-success-payment', async (req, res) => {
     return res.status(500).send({ error: error.message });
   }
 });
+
+app.get('/payment',async (req,res)=>{
+  const email = req.query.email;
+  const query = {};
+  if(email){
+    query.customerEmail = email;
+  }
+  const cursor = paymentCollection.find(query);
+  const result = await cursor.toArray();
+  res.send(result)
+})
 
 
 
