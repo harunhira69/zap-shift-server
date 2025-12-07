@@ -4,6 +4,16 @@ const cors = require('cors');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const stripe = require('stripe')(process.env.STRIPE_SECRET);
 
+// firebase admin sdk
+
+const admin = require("firebase-admin");
+
+const serviceAccount = require("./firebase-admin-sdk.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
 
 const app = express()
 require('dotenv').config();
@@ -17,9 +27,29 @@ function createTrackingId() {
   return `${prefix}-${timestamp}-${randomStr}`;
 }
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.irtmkrl.mongodb.net/?appName=Cluster0`;
-
+// middleware
 app.use(express.json());
 app.use(cors());
+
+const verifyFbToken = async(req,res,next)=>{
+  const token = req.headers.authorization;
+  // console.log('Firebase token',token);
+  if(!token){
+    return res.status(401).send({message:'unauthorized access'})
+  }
+  try{
+    const idToken = token.split(' ')[1];
+    const decode = await admin.auth().verifyIdToken(idToken);
+    console.log("Decoded token",decode);
+    req.decoded_email = decode.email;
+
+  }
+  catch(err){
+    return res.status(401).send({message:'unauthorized access'});
+
+  }
+  next();
+}
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -43,8 +73,10 @@ async function run() {
     await client.connect();
 
     const db = client.db('zap_shift_db');
+    const userCollection = db.collection('users')
     const percelCollection = db.collection('parcels')
     const paymentCollection = db.collection('payments')
+    const riderCollection = db.collection('riders')
 
     // parcel api
     app.get('/parcel', async (req, res) => {
@@ -164,6 +196,7 @@ app.patch('/verify-success-payment', async (req, res) => {
     }
 
     const session = await stripe.checkout.sessions.retrieve(sessionId);
+    console.log(session)
 
     console.log("Session retrieved:", session);
     const trackingId = createTrackingId();
@@ -189,7 +222,7 @@ app.patch('/verify-success-payment', async (req, res) => {
         transaction:session.payment_intent,
         paymentStatus: session.payment_status,
         createdAt:new Date(),
-        trackingId:trackingId
+        trackingId: trackingId
       }
       if(payment.paymentStatus==='paid'){
   const resultPayment = await paymentCollection.insertOne(payment);
@@ -209,15 +242,78 @@ app.patch('/verify-success-payment', async (req, res) => {
   }
 });
 
-app.get('/payment',async (req,res)=>{
+app.get('/payment', verifyFbToken, async (req,res)=>{
   const email = req.query.email;
   const query = {};
   if(email){
     query.customerEmail = email;
+    if(email !==req.decoded_email){
+      return res.status(403).send({message:'forbidden access'})
+    }
   }
-  const cursor = paymentCollection.find(query);
+  const cursor = paymentCollection.find(query).sort({createdAt:-1});
   const result = await cursor.toArray();
   res.send(result)
+})
+
+
+
+app.post('/users',async(req,res)=>{
+  const user = req.body;
+  user.createdAt = new Date();
+  user.role = 'user';
+  const userExist = await userCollection.findOne({email:user.email});
+  if(userExist){
+    return res.send({message:'User already exist'})
+  }
+  const result = await userCollection.insertOne(user);
+  res.send(result);
+
+})
+
+
+// rider related api
+app.post('/riders',async(req,res)=>{
+  const rider = req.body;
+  rider.createdAt =  new Date();
+  rider.status = 'pending';
+  const result = await riderCollection.insertOne(rider);
+  res.send(result);
+});
+
+app.get('/riders',async(req,res)=>{
+  const query = {};
+  if(req.query.status){
+    query.status = req.query.status;
+  }
+  const cursor = riderCollection.find(query);
+  const result = await cursor.toArray();
+  res.send(result);
+
+})
+
+
+app.patch('/riders/:id',async(req,res)=>{
+  const id = req.params.id;
+  const status = req.body.status;
+  const query = {_id: new ObjectId(id)};
+  const updateDoc = {
+    $set:{
+      status:status
+    }
+  }
+  const result = await riderCollection.updateOne(query,updateDoc);
+  res.send(result);
+})
+
+
+
+app.delete('/riders/:id',async(req,res)=>{
+  const id = req.params.id;
+  const query = {_id:new ObjectId(id)};
+  const result = await riderCollection.deleteOne(query);
+  res.send(result)
+  
 })
 
 
